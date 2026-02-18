@@ -1,233 +1,552 @@
-<!doctype html>
-<html lang="it">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
-  <title>Scacco Runner</title>
-
-  <style>
-    :root{
-      --bg1:#fbf7f0;
-      --bg2:#f3efe7;
-      --ink:#141414;
-      --muted:#6b6b6b;
-      --card:rgba(255,255,255,.75);
-      --stroke:rgba(0,0,0,.08);
-      --gold:#b08d57;
-      --shadow:0 16px 40px rgba(0,0,0,.10);
-      --r:18px;
-    }
-    *{ box-sizing:border-box; }
-    body{
-      margin:0;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      color:var(--ink);
-      background:
-        radial-gradient(1200px 600px at 20% 0%, #fff, transparent 60%),
-        radial-gradient(900px 500px at 90% 10%, var(--bg2), transparent 55%),
-        linear-gradient(180deg, #fff, var(--bg1));
-    }
-    .wrap{ max-width:560px; margin:0 auto; padding:16px; }
-    .topbar{ display:flex; gap:12px; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
-    .brand{
-      flex:1;
-      background:var(--card);
-      border:1px solid var(--stroke);
-      border-radius:var(--r);
-      padding:12px 14px;
-      box-shadow:var(--shadow);
-      backdrop-filter: blur(8px);
-    }
-    .brand h1{ margin:0; font-size:18px; letter-spacing:.2px; }
-    .brand p{ margin:6px 0 0; color:var(--muted); font-size:13px; line-height:1.35; }
-    .pill{
-      display:inline-flex; align-items:center; gap:8px;
-      padding:10px 12px;
-      border-radius:999px;
-      border:1px solid var(--stroke);
-      background:var(--card);
-      box-shadow:var(--shadow);
-      font-weight:800;
-      white-space:nowrap;
-    }
-    .pill .dot{ width:8px; height:8px; border-radius:50%; background:var(--gold); }
-
-    .card{
-      background:var(--card);
-      border:1px solid var(--stroke);
-      border-radius:var(--r);
-      padding:12px;
-      box-shadow:var(--shadow);
-      margin-bottom:12px;
-      backdrop-filter: blur(8px);
-    }
-
-    .stage{
-      position:relative;
-      border-radius: calc(var(--r) + 4px);
-      overflow:hidden;
-      border:1px solid var(--stroke);
-      background: linear-gradient(180deg,#fff,#f7f3ec);
-    }
-    canvas{
-      width:100%;
-      height:360px;
-      display:block;
-      touch-action: manipulation;
-    }
-    .scoreBox{
-      position:absolute; top:12px; right:12px;
-      background:rgba(255,255,255,.86);
-      border:1px solid var(--stroke);
-      border-radius:14px;
-      padding:10px 12px;
-      box-shadow: 0 12px 26px rgba(0,0,0,.10);
-      min-width:140px;
-      text-align:right;
-      pointer-events:none;
-    }
-    .scoreBox .label{
-      font-size:11px; color:var(--muted);
-      letter-spacing:.12em; text-transform:uppercase;
-    }
-    .scoreBox .val{
-      font-size:26px; font-weight:900; line-height:1;
-      margin-top:4px;
-    }
-
-    .bottomBar{
-      display:flex; gap:10px; align-items:center; justify-content:space-between;
-      margin-top:10px; flex-wrap:wrap;
-    }
-    .btn{
-      border:0;
-      border-radius:14px;
-      padding:10px 12px;
-      font-weight:900;
-      cursor:pointer;
-      background: var(--ink);
-      color:#fff;
-      box-shadow: 0 12px 24px rgba(0,0,0,.14);
-    }
-    .btn:active{ transform:scale(.99); }
-    .hint{ color:var(--muted); font-size:13px; }
-    .foot{ color:var(--muted); font-size:12px; margin-top:8px; }
-
-    ol{ margin:10px 0 0; padding-left:18px; }
-    #board li{
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-      padding:8px 10px;
-      border-radius:12px;
-    }
-    #board li:nth-child(odd){ background: rgba(0,0,0,0.03); }
-    #board li:first-child{
-      background: rgba(176,141,87,0.20);
-      font-weight:900;
-    }
-  </style>
-
-  <!-- Supabase JS -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-</head>
-
-<body>
-  <div class="wrap">
-    <div class="topbar">
-      <div class="brand">
-        <h1>♟️ Scacco Runner</h1>
-        <p>
-          Tap per saltare i pedoni. <b>Top 10 del mese</b>. #1 a fine mese = cena premio.
-        </p>
-      </div>
-      <div class="pill"><span class="dot"></span> Tap to jump</div>
-    </div>
-
-    <div class="card">
-      <div class="stage">
-        <canvas id="c"></canvas>
-        <div class="scoreBox">
-          <div class="label">Punteggio</div>
-          <div class="val" id="score">0</div>
-        </div>
-      </div>
-      <div class="bottomBar">
-        <div class="hint">Consiglio: salta “tardi” per fare più punti.</div>
-        <button class="btn" id="restart">Ricomincia</button>
-      </div>
-      <div class="foot">Mese corrente: <span id="month"></span></div>
-    </div>
-
-    <div class="card">
-      <h2 style="margin:0;font-size:16px;">🏆 Top 10 del mese</h2>
-      <ol id="board"></ol>
-      <div class="foot">Suggerimento: aggiungi le regole premio nel menù (validità, un premio per persona, ecc.).</div>
-    </div>
-  </div>
-
-  <script>
-    // ==== SUPABASE CONFIG ====
-    const SUPABASE_URL = "https://fhkqtcwvfgrvjmhoddj.supabase.co";
-    const SUPABASE_ANON_KEY = "sb_publishable_32cqiPTJQIZAX9skeRaTFQ_yQm7GoT3";
-
-    // Esponiamo anche URL/KEY per fallback in game.js (anti "manca Supabase")
-    window.__SUPABASE_URL = SUPABASE_URL;
-    window.__SUPABASE_KEY = SUPABASE_ANON_KEY;
-
-    // Creiamo client
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    window.__sb = sb;
-
-    const monthKey = () => new Date().toISOString().slice(0,7);
-    document.getElementById("month").textContent = monthKey();
-
-    function escapeHtml(s){
-      return String(s).replace(/[&<>"']/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    }
-
-    async function loadBoard(){
-      const mk = monthKey();
-      const { data, error } = await sb
-        .from("scores")
-        .select("name,score,created_at")
-        .eq("month_key", mk)
-        .order("score", { ascending:false })
-        .order("created_at", { ascending:true })
-        .limit(10);
-
-      const board = document.getElementById("board");
-      board.innerHTML = "";
-
-      if (error){
-        const li = document.createElement("li");
-        li.textContent = "Errore nel caricare la classifica.";
-        board.appendChild(li);
-        return;
-      }
-      if (!data || data.length === 0){
-        const li = document.createElement("li");
-        li.textContent = "Nessun punteggio ancora. Sii il primo!";
-        board.appendChild(li);
-        return;
-      }
-
-      data.forEach((r, i) => {
-        const li = document.createElement("li");
-        const medal = i === 0 ? "🥇 " : (i === 1 ? "🥈 " : (i === 2 ? "🥉 " : ""));
-        li.innerHTML = `<span><b>${medal}${escapeHtml(r.name)}</b></span><span>${r.score}</span>`;
-        board.appendChild(li);
-      });
-    }
-
-    // Live updates
-    sb.channel("scores-live")
-      .on("postgres_changes", { event:"INSERT", schema:"public", table:"scores" }, loadBoard)
-      .subscribe();
-
-    loadBoard();
-  </script>
-
-  <script src="./game.js"></script>
-</body>
-</html>
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/index.html b/index.html
+index 40440e870ac458bf53cb2243a33c1625eb2ae132..ad230e14b145662bbcbacfa15d055c1822d43dd4 100644
+--- a/index.html
++++ b/index.html
+@@ -1,233 +1,341 @@
+ <!doctype html>
+ <html lang="it">
+ <head>
+   <meta charset="utf-8" />
+-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+-  <title>Scacco Runner</title>
+-
++  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
++  <title>Re dello Scacco</title>
+   <style>
+-    :root{
+-      --bg1:#fbf7f0;
+-      --bg2:#f3efe7;
+-      --ink:#141414;
+-      --muted:#6b6b6b;
+-      --card:rgba(255,255,255,.75);
+-      --stroke:rgba(0,0,0,.08);
+-      --gold:#b08d57;
+-      --shadow:0 16px 40px rgba(0,0,0,.10);
+-      --r:18px;
+-    }
+-    *{ box-sizing:border-box; }
+-    body{
+-      margin:0;
+-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+-      color:var(--ink);
++    :root {
++      --paper: #f6f0e5;
++      --paper-2: #efe6d6;
++      --ink: #181715;
++      --gold: #b79048;
++      --gold-soft: #d5b678;
++      --card: rgba(255, 250, 240, 0.74);
++      --stroke: rgba(24, 23, 21, 0.12);
++      --muted: #5f584d;
++      --radius: 18px;
++      --shadow: 0 14px 34px rgba(20, 15, 7, 0.16);
++    }
++
++    * { box-sizing: border-box; }
++
++    body {
++      margin: 0;
++      min-height: 100dvh;
++      font-family: "Inter", "Avenir Next", system-ui, -apple-system, sans-serif;
++      color: var(--ink);
+       background:
+-        radial-gradient(1200px 600px at 20% 0%, #fff, transparent 60%),
+-        radial-gradient(900px 500px at 90% 10%, var(--bg2), transparent 55%),
+-        linear-gradient(180deg, #fff, var(--bg1));
+-    }
+-    .wrap{ max-width:560px; margin:0 auto; padding:16px; }
+-    .topbar{ display:flex; gap:12px; align-items:flex-start; justify-content:space-between; margin-bottom:12px; }
+-    .brand{
+-      flex:1;
+-      background:var(--card);
+-      border:1px solid var(--stroke);
+-      border-radius:var(--r);
+-      padding:12px 14px;
+-      box-shadow:var(--shadow);
+-      backdrop-filter: blur(8px);
+-    }
+-    .brand h1{ margin:0; font-size:18px; letter-spacing:.2px; }
+-    .brand p{ margin:6px 0 0; color:var(--muted); font-size:13px; line-height:1.35; }
+-    .pill{
+-      display:inline-flex; align-items:center; gap:8px;
+-      padding:10px 12px;
+-      border-radius:999px;
+-      border:1px solid var(--stroke);
+-      background:var(--card);
+-      box-shadow:var(--shadow);
+-      font-weight:800;
+-      white-space:nowrap;
+-    }
+-    .pill .dot{ width:8px; height:8px; border-radius:50%; background:var(--gold); }
+-
+-    .card{
+-      background:var(--card);
+-      border:1px solid var(--stroke);
+-      border-radius:var(--r);
+-      padding:12px;
+-      box-shadow:var(--shadow);
+-      margin-bottom:12px;
+-      backdrop-filter: blur(8px);
+-    }
+-
+-    .stage{
+-      position:relative;
+-      border-radius: calc(var(--r) + 4px);
+-      overflow:hidden;
+-      border:1px solid var(--stroke);
+-      background: linear-gradient(180deg,#fff,#f7f3ec);
+-    }
+-    canvas{
+-      width:100%;
+-      height:360px;
+-      display:block;
++        radial-gradient(1200px 520px at 12% -10%, rgba(255, 255, 255, 0.88), transparent 58%),
++        radial-gradient(800px 360px at 95% 8%, rgba(183, 144, 72, 0.16), transparent 52%),
++        linear-gradient(180deg, var(--paper), var(--paper-2));
++      padding: 14px;
++    }
++
++    .app {
++      max-width: 560px;
++      margin: 0 auto;
++      display: flex;
++      flex-direction: column;
++      gap: 12px;
++    }
++
++    .card {
++      background: var(--card);
++      border: 1px solid var(--stroke);
++      border-radius: var(--radius);
++      box-shadow: var(--shadow);
++      backdrop-filter: blur(10px);
++    }
++
++    .hero {
++      padding: 14px;
++      display: flex;
++      align-items: center;
++      justify-content: space-between;
++      gap: 10px;
++    }
++
++    .hero h1 {
++      margin: 0;
++      font-size: 1.2rem;
++      letter-spacing: 0.02em;
++    }
++
++    .hero p {
++      margin: 6px 0 0;
++      color: var(--muted);
++      font-size: 0.88rem;
++      line-height: 1.35;
++    }
++
++    .hint-pill {
++      border: 1px solid rgba(183, 144, 72, 0.45);
++      color: #6f561f;
++      background: rgba(255, 246, 222, 0.95);
++      border-radius: 999px;
++      font-size: 0.78rem;
++      font-weight: 700;
++      padding: 8px 12px;
++      white-space: nowrap;
++    }
++
++    .game-card { padding: 12px; }
++
++    .game-wrapper {
++      position: relative;
++      border-radius: 20px;
++      overflow: hidden;
++      border: 2px solid rgba(183, 144, 72, 0.82);
++      box-shadow: inset 0 0 0 1px rgba(255, 244, 219, 0.55);
++      background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 237, 220, 0.92));
++      min-height: 340px;
++    }
++
++    canvas {
++      width: 100%;
++      height: 360px;
++      display: block;
+       touch-action: manipulation;
+     }
+-    .scoreBox{
+-      position:absolute; top:12px; right:12px;
+-      background:rgba(255,255,255,.86);
+-      border:1px solid var(--stroke);
+-      border-radius:14px;
+-      padding:10px 12px;
+-      box-shadow: 0 12px 26px rgba(0,0,0,.10);
+-      min-width:140px;
+-      text-align:right;
+-      pointer-events:none;
+-    }
+-    .scoreBox .label{
+-      font-size:11px; color:var(--muted);
+-      letter-spacing:.12em; text-transform:uppercase;
+-    }
+-    .scoreBox .val{
+-      font-size:26px; font-weight:900; line-height:1;
+-      margin-top:4px;
+-    }
+-
+-    .bottomBar{
+-      display:flex; gap:10px; align-items:center; justify-content:space-between;
+-      margin-top:10px; flex-wrap:wrap;
+-    }
+-    .btn{
+-      border:0;
+-      border-radius:14px;
+-      padding:10px 12px;
+-      font-weight:900;
+-      cursor:pointer;
++
++    .hud-score {
++      position: absolute;
++      top: 12px;
++      right: 12px;
++      pointer-events: none;
++      text-align: right;
++      background: rgba(255, 255, 255, 0.86);
++      border: 1px solid rgba(24, 23, 21, 0.1);
++      border-radius: 14px;
++      min-width: 120px;
++      padding: 9px 10px;
++      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
++    }
++
++    .hud-score .label {
++      font-size: 0.66rem;
++      letter-spacing: 0.12em;
++      text-transform: uppercase;
++      color: var(--muted);
++    }
++
++    .hud-score .value {
++      font-size: 1.9rem;
++      line-height: 1;
++      font-weight: 900;
++      margin-top: 5px;
++    }
++
++    .game-meta {
++      margin-top: 10px;
++      display: flex;
++      align-items: center;
++      justify-content: space-between;
++      gap: 8px;
++      flex-wrap: wrap;
++      color: var(--muted);
++      font-size: 0.83rem;
++    }
++
++    .button {
++      border: 0;
++      border-radius: 12px;
+       background: var(--ink);
+-      color:#fff;
+-      box-shadow: 0 12px 24px rgba(0,0,0,.14);
+-    }
+-    .btn:active{ transform:scale(.99); }
+-    .hint{ color:var(--muted); font-size:13px; }
+-    .foot{ color:var(--muted); font-size:12px; margin-top:8px; }
+-
+-    ol{ margin:10px 0 0; padding-left:18px; }
+-    #board li{
+-      display:flex;
+-      justify-content:space-between;
+-      gap:10px;
+-      padding:8px 10px;
+-      border-radius:12px;
+-    }
+-    #board li:nth-child(odd){ background: rgba(0,0,0,0.03); }
+-    #board li:first-child{
+-      background: rgba(176,141,87,0.20);
+-      font-weight:900;
++      color: #fff;
++      font-weight: 800;
++      padding: 10px 14px;
++      cursor: pointer;
+     }
+-  </style>
+ 
+-  <!-- Supabase JS -->
+-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+-</head>
++    .button.secondary {
++      background: rgba(24, 23, 21, 0.12);
++      color: var(--ink);
++    }
+ 
+-<body>
+-  <div class="wrap">
+-    <div class="topbar">
+-      <div class="brand">
+-        <h1>♟️ Scacco Runner</h1>
+-        <p>
+-          Tap per saltare i pedoni. <b>Top 10 del mese</b>. #1 a fine mese = cena premio.
+-        </p>
+-      </div>
+-      <div class="pill"><span class="dot"></span> Tap to jump</div>
+-    </div>
++    .leaderboard { padding: 12px; }
+ 
+-    <div class="card">
+-      <div class="stage">
+-        <canvas id="c"></canvas>
+-        <div class="scoreBox">
+-          <div class="label">Punteggio</div>
+-          <div class="val" id="score">0</div>
+-        </div>
+-      </div>
+-      <div class="bottomBar">
+-        <div class="hint">Consiglio: salta “tardi” per fare più punti.</div>
+-        <button class="btn" id="restart">Ricomincia</button>
+-      </div>
+-      <div class="foot">Mese corrente: <span id="month"></span></div>
+-    </div>
++    .leaderboard h2 {
++      margin: 0;
++      font-size: 1rem;
++    }
+ 
+-    <div class="card">
+-      <h2 style="margin:0;font-size:16px;">🏆 Top 10 del mese</h2>
+-      <ol id="board"></ol>
+-      <div class="foot">Suggerimento: aggiungi le regole premio nel menù (validità, un premio per persona, ecc.).</div>
+-    </div>
+-  </div>
++    #leaderboardStatus {
++      margin: 8px 0 0;
++      min-height: 1.2em;
++      color: var(--muted);
++      font-size: 0.82rem;
++    }
+ 
+-  <script>
+-    // ==== SUPABASE CONFIG ====
+-    const SUPABASE_URL = "https://fhkqtcwvfgrvjmhoddj.supabase.co";
+-    const SUPABASE_ANON_KEY = "sb_publishable_32cqiPTJQIZAX9skeRaTFQ_yQm7GoT3";
++    .board {
++      list-style: none;
++      margin: 10px 0 0;
++      padding: 0;
++      border-radius: 12px;
++      overflow: hidden;
++      border: 1px solid var(--stroke);
++    }
+ 
+-    // Esponiamo anche URL/KEY per fallback in game.js (anti "manca Supabase")
+-    window.__SUPABASE_URL = SUPABASE_URL;
+-    window.__SUPABASE_KEY = SUPABASE_ANON_KEY;
++    .board li {
++      display: grid;
++      grid-template-columns: 42px 1fr auto;
++      gap: 8px;
++      align-items: center;
++      padding: 10px;
++      font-size: 0.92rem;
++    }
++
++    .board li:nth-child(odd) { background: rgba(255, 255, 255, 0.35); }
++    .board li:nth-child(even) { background: rgba(0, 0, 0, 0.03); }
++
++    .rank-badge {
++      width: 30px;
++      text-align: center;
++      border-radius: 999px;
++      font-size: 0.74rem;
++      font-weight: 800;
++      padding: 3px 0;
++      border: 1px solid transparent;
++    }
++
++    .rank-gold { background: rgba(255, 214, 105, 0.42); border-color: rgba(183, 144, 72, 0.7); }
++    .rank-silver { background: rgba(220, 225, 231, 0.72); border-color: rgba(124, 131, 139, 0.65); }
++    .rank-bronze { background: rgba(211, 158, 112, 0.36); border-color: rgba(149, 95, 49, 0.6); }
+ 
+-    // Creiamo client
+-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+-    window.__sb = sb;
++    .score-number { font-weight: 800; }
+ 
+-    const monthKey = () => new Date().toISOString().slice(0,7);
+-    document.getElementById("month").textContent = monthKey();
++    .empty {
++      color: var(--muted);
++      font-size: 0.86rem;
++      margin-top: 10px;
++    }
+ 
+-    function escapeHtml(s){
+-      return String(s).replace(/[&<>"']/g, (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
++    .modal-backdrop {
++      position: fixed;
++      inset: 0;
++      background: rgba(9, 9, 8, 0.56);
++      display: none;
++      place-items: center;
++      z-index: 30;
++      padding: 16px;
+     }
+ 
+-    async function loadBoard(){
+-      const mk = monthKey();
+-      const { data, error } = await sb
+-        .from("scores")
+-        .select("name,score,created_at")
+-        .eq("month_key", mk)
+-        .order("score", { ascending:false })
+-        .order("created_at", { ascending:true })
+-        .limit(10);
++    .modal-backdrop.show { display: grid; }
+ 
+-      const board = document.getElementById("board");
+-      board.innerHTML = "";
++    .modal {
++      width: min(420px, 100%);
++      border-radius: 18px;
++      border: 1px solid var(--stroke);
++      padding: 16px;
++      background: rgba(255, 250, 239, 0.95);
++      box-shadow: var(--shadow);
++    }
+ 
+-      if (error){
+-        const li = document.createElement("li");
+-        li.textContent = "Errore nel caricare la classifica.";
+-        board.appendChild(li);
+-        return;
+-      }
+-      if (!data || data.length === 0){
+-        const li = document.createElement("li");
+-        li.textContent = "Nessun punteggio ancora. Sii il primo!";
+-        board.appendChild(li);
+-        return;
+-      }
++    .modal h3 { margin: 0; font-size: 1.08rem; }
++    .modal p { margin: 8px 0; color: var(--muted); }
++
++    .modal .score { font-size: 2rem; font-weight: 900; margin: 6px 0 10px; }
+ 
+-      data.forEach((r, i) => {
+-        const li = document.createElement("li");
+-        const medal = i === 0 ? "🥇 " : (i === 1 ? "🥈 " : (i === 2 ? "🥉 " : ""));
+-        li.innerHTML = `<span><b>${medal}${escapeHtml(r.name)}</b></span><span>${r.score}</span>`;
+-        board.appendChild(li);
+-      });
++    .input {
++      width: 100%;
++      border-radius: 12px;
++      border: 1px solid var(--stroke);
++      background: #fff;
++      color: var(--ink);
++      padding: 11px;
++      font-size: 0.95rem;
+     }
+ 
+-    // Live updates
+-    sb.channel("scores-live")
+-      .on("postgres_changes", { event:"INSERT", schema:"public", table:"scores" }, loadBoard)
+-      .subscribe();
++    .error {
++      margin-top: 8px;
++      min-height: 1.2em;
++      color: #b02828;
++      font-size: 0.85rem;
++    }
++
++    .modal-actions {
++      margin-top: 10px;
++      display: flex;
++      gap: 8px;
++      justify-content: flex-end;
++      flex-wrap: wrap;
++    }
++
++    .footer-note {
++      color: var(--muted);
++      text-align: center;
++      font-size: 0.78rem;
++      margin-top: 6px;
++    }
++  </style>
+ 
+-    loadBoard();
++  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
++  <script>
++    const SUPABASE_URL = "https://fhkqtcwvfgrvjmhoddj.supabase.co";
++    const SUPABASE_KEY = "sb_publishable_32cqiPTJQIZAX9skeRaTFQ_yQm7GoT3";
++    const SUPABASE_ANON_JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZoa3F0Y3dmdmdydmptamhvZGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0MzU4NzgsImV4cCI6MjA4NzAxMTg3OH0.zMI_7B8T2ZVStv8uwr0fWXjCHGRd05GuLF53LlZ6eOs";
++
++    window.__SUPABASE_URL = SUPABASE_URL;
++    window.__SUPABASE_KEY = SUPABASE_KEY;
++    window.__SUPABASE_ANON_JWT = SUPABASE_ANON_JWT;
++
++    if (window.supabase) {
++      try {
++        window.__sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
++      } catch (error) {
++        window.__sb = null;
++      }
++    }
+   </script>
++  <script defer src="./game.js"></script>
++</head>
++<body>
++  <main class="app">
++    <section class="card hero">
++      <div>
++        <h1>♟️ Re dello Scacco</h1>
++        <p>Endless runner del ristorante: evita i pedoni e scala la Top 10 mensile live.</p>
++      </div>
++      <span class="hint-pill">Tap per saltare</span>
++    </section>
+ 
+-  <script src="./game.js"></script>
++    <section class="card game-card">
++      <div class="game-wrapper" id="gameWrapper">
++        <canvas id="gameCanvas" aria-label="Gioco Re dello Scacco"></canvas>
++        <div class="hud-score" aria-live="polite">
++          <div class="label">Punteggio</div>
++          <div class="value" id="scoreValue">0</div>
++        </div>
++      </div>
++      <div class="game-meta">
++        <span>Mese leaderboard: <strong id="monthLabel"></strong></span>
++        <button id="restartBtn" class="button" type="button">Riprova ora</button>
++      </div>
++    </section>
++
++    <section class="card leaderboard">
++      <h2>🏆 Top 10 del mese</h2>
++      <p id="leaderboardStatus"></p>
++      <ol id="leaderboardList" class="board"></ol>
++      <p id="leaderboardEmpty" class="empty" hidden>Nessun punteggio per questo mese. Sii il primo!</p>
++    </section>
++
++    <p class="footer-note">Suggerimento: integra il link del gioco nel menu digitale o su QR al tavolo.</p>
++  </main>
++
++  <div class="modal-backdrop" id="gameOverModal" role="dialog" aria-modal="true" aria-labelledby="gameOverTitle">
++    <div class="modal">
++      <h3 id="gameOverTitle">Partita terminata</h3>
++      <p>Hai totalizzato:</p>
++      <div class="score" id="finalScore">0</div>
++      <label for="playerName">Nome leaderboard (max 16)</label>
++      <input id="playerName" class="input" type="text" maxlength="16" autocomplete="nickname" placeholder="Es. Marco.88" />
++      <div id="modalError" class="error" role="status" aria-live="polite"></div>
++      <div class="modal-actions">
++        <button id="retryBtn" class="button secondary" type="button">Riprova</button>
++        <button id="submitBtn" class="button" type="button">Invia</button>
++      </div>
++    </div>
++  </div>
+ </body>
+ </html>
+ 
+EOF
+)
