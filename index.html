@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Scacco Runner</title>
+  <style>
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0b0b; color:#fff; }
+    .wrap { max-width: 520px; margin: 0 auto; padding: 14px; }
+    .card { background:#151515; border-radius:16px; padding:14px; margin-bottom:12px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    .row { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+    .btn { background:#ffffff; color:#000; border:0; border-radius:12px; padding:10px 12px; font-weight:700; cursor:pointer; }
+    .btn:active { transform: scale(.98); }
+    .muted { color:#bdbdbd; font-size: 13px; }
+    canvas { width:100%; height: 320px; background: #0f0f0f; border-radius: 16px; display:block; touch-action: manipulation; }
+    input { width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid #2b2b2b; background:#0f0f0f; color:#fff; }
+    ol { margin: 8px 0 0; padding-left: 20px; }
+    li { margin: 6px 0; }
+    .pill { display:inline-block; padding:4px 8px; border:1px solid #2b2b2b; border-radius:999px; font-size:12px; color:#cfcfcf; }
+  </style>
+
+  <!-- Supabase JS via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="row">
+        <h1>♟️ Scacco Runner</h1>
+        <span class="pill">Tap per saltare</span>
+      </div>
+      <p class="muted" style="margin:8px 0 0;">
+        Obiettivo: evita i pedoni. Più vai avanti, più accelera. A fine partita invia il punteggio alla Top 10 del mese.
+      </p>
+    </div>
+
+    <div class="card">
+      <canvas id="c"></canvas>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <div>Punteggio: <b id="score">0</b></div>
+          <div class="muted">Mese: <span id="month"></span></div>
+        </div>
+        <button class="btn" id="restart">Ricomincia</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h1>🏆 Top 10 del mese</h1>
+      <ol id="board"></ol>
+      <p class="muted" style="margin-top:10px;">
+        Premio: chi è #1 a fine mese vince una cena (regole nel menù).
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // 1) Config Supabase
+    const SUPABASE_URL = "https://fhkqtcwvfgrvjmhoddj.supabase.co
+";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZoa3F0Y3dmdmdydmptamhvZGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0MzU4NzgsImV4cCI6MjA4NzAxMTg3OH0.zMI_7B8T2ZVStv8uwr0fWXjCHGRd05GuLF53LlZ6eOs";
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // 2) Helpers
+    const monthKey = () => new Date().toISOString().slice(0,7); // UTC: "YYYY-MM"
+    document.getElementById("month").textContent = monthKey();
+
+    async function loadBoard() {
+      const mk = monthKey();
+      const { data, error } = await supabase
+        .from("scores")
+        .select("name,score,created_at")
+        .eq("month_key", mk)
+        .order("score", { ascending: false })
+        .order("created_at", { ascending: true })
+        .limit(10);
+
+      const board = document.getElementById("board");
+      board.innerHTML = "";
+
+      if (error) {
+        const li = document.createElement("li");
+        li.textContent = "Errore nel caricare la leaderboard.";
+        board.appendChild(li);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        const li = document.createElement("li");
+        li.textContent = "Nessun punteggio ancora. Sii il primo!";
+        board.appendChild(li);
+        return;
+      }
+
+      for (const row of data) {
+        const li = document.createElement("li");
+        li.innerHTML = `<b>${escapeHtml(row.name)}</b> — ${row.score}`;
+        board.appendChild(li);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // 3) Realtime: refresh quando qualcuno inserisce un punteggio
+    supabase
+      .channel("scores-live")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "scores" }, () => {
+        loadBoard();
+      })
+      .subscribe();
+
+    // 4) Avvia gioco
+    loadBoard();
+  </script>
+
+  <script src="./game.js"></script>
+</body>
+</html>
