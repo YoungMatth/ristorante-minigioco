@@ -2,7 +2,10 @@
   const canvas = document.getElementById("c");
   const ctx = canvas.getContext("2d");
 
-  // canvas retina
+  const scoreEl = document.getElementById("score");
+  const restartBtn = document.getElementById("restart");
+
+  // Retina resize
   function resize() {
     const rect = canvas.getBoundingClientRect();
     const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -12,238 +15,297 @@
   }
   window.addEventListener("resize", resize);
 
-  const scoreEl = document.getElementById("score");
-  const restartBtn = document.getElementById("restart");
+  const W = () => canvas.getBoundingClientRect().width;
+  const H = () => canvas.getBoundingClientRect().height;
 
-  // Supabase client già creato in index.html
-  const supabase = window.supabaseClient || window.supabase; // fallback (non usato)
-  // In realtà usiamo la variabile globale "supabase" definita in index.html:
-  const db = window.supabase ? null : null; // noop
+  // Game feel (più stretto)
+  const GRAVITY = 2200;       // più gravità = salto più corto
+  const JUMP_V = -720;        // meno “luna”
+  const COYOTE = 0.075;       // 75ms: perdona un pelo
+  const JUMP_BUFFER = 0.09;   // tap poco prima di toccare
 
-  // Recupera il client creato in index.html
-  // (è "supabase" nello scope globale della pagina)
-  const sb = window.supabaseClientGlobal || window.supabaseInstance || window.supabaseClient || window.supabase;
-  // più robusto: prendiamo quello globale nominato "supabase" se esiste
-  const supa = (typeof window.supabase !== "undefined" && window.supabase.from) ? window.supabase : (typeof supabase !== "undefined" && supabase.from ? supabase : null);
-  // ma nel nostro index.html si chiama "supabase" (const supabase = ...), quindi è globale? no: è nello script.
-  // Soluzione: esponiamolo esplicitamente:
-  // (se non c'è, non blocchiamo il gioco: il submit fallirà)
-  // Nota: per semplicità, useremo window.__sb se presente.
-  // Vedrai sotto: in start() proviamo a leggere window.__sb.
-  
-  function monthKey() {
-    return new Date().toISOString().slice(0,7);
-  }
-
-  // Stato gioco
-  let running = false;
+  let running = true;
   let lastT = 0;
-  let time = 0;
-  let speed = 220; // px/s
+  let t = 0;
+  let speed = 330;            // base speed più allegra
   let score = 0;
 
-  const groundY = 260;
+  // Ground
+  const groundPad = 58;       // distanza dal fondo
+  const groundY = () => H() - groundPad;
+
   const player = {
-    x: 70,
-    y: groundY,
+    x: 90,
+    y: 0,
     vy: 0,
-    r: 14,
-    onGround: true,
+    w: 26,
+    h: 38,
+    onGround: false,
+    coyoteT: 0,
+    jumpBufT: 0
   };
 
   let obstacles = [];
-  let spawnTimer = 0;
+  let spawnT = 0;
+
+  function monthKey() { return new Date().toISOString().slice(0,7); }
 
   function reset() {
     running = true;
     lastT = performance.now();
-    time = 0;
-    speed = 220;
+    t = 0;
+    speed = 330;
     score = 0;
-    scoreEl.textContent = "0";
-    player.y = groundY;
+    obstacles = [];
+    spawnT = 0.5;
+
+    player.y = groundY();
     player.vy = 0;
     player.onGround = true;
-    obstacles = [];
-    spawnTimer = 0;
+    player.coyoteT = 0;
+    player.jumpBufT = 0;
+
+    scoreEl.textContent = "0";
   }
 
-  function jump() {
-    if (!running) return;
-    if (player.onGround) {
-      player.vy = -520;
-      player.onGround = false;
-    }
+  function requestJump() {
+    if (!running) { reset(); return; }
+    player.jumpBufT = JUMP_BUFFER;
+  }
+
+  function doJump() {
+    player.vy = JUMP_V;
+    player.onGround = false;
+    player.coyoteT = 0;
+    player.jumpBufT = 0;
   }
 
   function spawnObstacle() {
-    // “pedone” come rettangolo con testina
-    const w = 18;
-    const h = 34;
-    const gap = 320 + Math.random() * 260; // distanza variabile
-    const lastX = obstacles.length ? obstacles[obstacles.length - 1].x : 520;
-    obstacles.push({
-      x: Math.max(520, lastX + gap),
-      w, h,
-    });
+    const pawn = {
+      x: W() + 40,
+      w: 20 + Math.random()*8,
+      h: 34 + Math.random()*10
+    };
+    obstacles.push(pawn);
   }
 
-  function collideCircleRect(cx, cy, r, rx, ry, rw, rh) {
-    const x = Math.max(rx, Math.min(cx, rx + rw));
-    const y = Math.max(ry, Math.min(cy, ry + rh));
-    const dx = cx - x;
-    const dy = cy - y;
-    return (dx*dx + dy*dy) <= r*r;
+  function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
   }
 
   function gameOver() {
     running = false;
-    draw(true);
-    submitScore(score);
+    // submit
+    submitScore(score).catch(()=>{});
   }
 
   async function submitScore(finalScore) {
-    // Chiedi nome
-    const name = prompt("Inserisci il tuo nome per la classifica (max 16 caratteri):");
-    if (!name) return;
-
-    const clean = name.trim().slice(0, 16);
-    if (!clean) return;
-
-    // Qui serve il client Supabase. In index.html è "const supabase = ..."
-    // Per renderlo accessibile qui, aggiungi 1 riga in index.html:
-    // window.__sb = supabase;
     const sb = window.__sb;
     if (!sb) {
       alert("Leaderboard non configurata (manca Supabase).");
       return;
     }
+    const name = prompt("Inserisci il tuo nome (max 16):");
+    if (!name) return;
+    const clean = name.trim().slice(0,16);
+    if (!clean) return;
 
     const { error } = await sb.from("scores").insert({
       name: clean,
       score: finalScore,
-      month_key: monthKey(),
+      month_key: monthKey()
     });
 
-    if (error) {
-      alert("Errore invio punteggio. Riprova.");
-    } else {
-      alert("Punteggio inviato! 🏆");
-    }
+    if (error) alert("Errore invio punteggio. Riprova.");
+    else alert("Punteggio inviato! 🏆");
   }
 
   function update(dt) {
-    time += dt;
+    t += dt;
 
-    // accelera piano
-    speed += 14 * dt;
+    // accelera in modo progressivo ma controllato
+    speed += 22 * dt;
 
-    // gravità
-    player.vy += 1200 * dt;
+    // timers
+    player.coyoteT = Math.max(0, player.coyoteT - dt);
+    player.jumpBufT = Math.max(0, player.jumpBufT - dt);
+
+    // gravity
+    player.vy += GRAVITY * dt;
     player.y += player.vy * dt;
 
-    if (player.y >= groundY) {
-      player.y = groundY;
+    // ground collision
+    const gy = groundY();
+    if (player.y >= gy) {
+      player.y = gy;
       player.vy = 0;
+      if (!player.onGround) player.coyoteT = COYOTE;
       player.onGround = true;
+    } else {
+      if (player.onGround) player.coyoteT = COYOTE;
+      player.onGround = false;
     }
 
-    // spawn ostacoli
-    spawnTimer -= dt;
-    if (spawnTimer <= 0) {
+    // buffered jump
+    if (player.jumpBufT > 0 && (player.onGround || player.coyoteT > 0)) {
+      doJump();
+    }
+
+    // spawn
+    spawnT -= dt;
+    if (spawnT <= 0) {
       spawnObstacle();
-      spawnTimer = Math.max(0.8, 1.35 - time * 0.01); // più frequenti col tempo
+      // più veloce col tempo, ma con un minimo
+      spawnT = Math.max(0.62, 1.10 - t * 0.02) + Math.random()*0.18;
     }
 
-    // muovi ostacoli
-    for (const o of obstacles) {
-      o.x -= speed * dt;
-    }
-    // rimuovi fuori schermo
-    obstacles = obstacles.filter(o => o.x + o.w > -40);
+    // move obstacles
+    for (const o of obstacles) o.x -= speed * dt;
+    obstacles = obstacles.filter(o => o.x + o.w > -60);
 
-    // punteggio = tempo * fattore
-    score = Math.floor(time * 10);
+    // score: cresce in modo “chiaro”
+    // distanza ~ speed integrata => più soddisfacente
+    score = Math.floor((t * 12) + (speed - 330) * 0.35);
     scoreEl.textContent = String(score);
 
-    // collisione
+    // collisions (player box)
+    const px = player.x - player.w/2;
+    const py = player.y - player.h;
     for (const o of obstacles) {
-      const rx = o.x;
-      const ry = groundY - o.h;
-      if (collideCircleRect(player.x, player.y, player.r, rx, ry, o.w, o.h)) {
+      const ox = o.x;
+      const oy = gy - o.h;
+      if (rectsOverlap(px+4, py+6, player.w-8, player.h-6, ox, oy, o.w, o.h)) {
         gameOver();
         break;
       }
     }
   }
 
-  function draw(over=false) {
-    // background
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // --- DRAW (stile menu elegante) ---
+  function draw() {
+    const w = W(), h = H();
+    const gy = groundY();
 
-    // “pista”
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = "#0f0f0f";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // background gradient
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, "#ffffff");
+    g.addColorStop(1, "#f6f2ea");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
 
-    // linea terreno
-    ctx.fillStyle = "#2a2a2a";
-    ctx.fillRect(0, groundY + 16, canvas.width, 3);
+    // subtle vignette
+    ctx.fillStyle = "rgba(0,0,0,0.03)";
+    ctx.fillRect(0, 0, w, h);
 
-    // player (scacco)
-    // corpo
-    ctx.fillStyle = "#ffffff";
+    // ground line
+    ctx.strokeStyle = "rgba(0,0,0,0.12)";
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2);
-    ctx.fill();
-    // corona semplice
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(player.x - 8, player.y - 18, 16, 4);
+    ctx.moveTo(0, gy + 18);
+    ctx.lineTo(w, gy + 18);
+    ctx.stroke();
 
-    // ostacoli (pedoni)
-    for (const o of obstacles) {
-      const x = o.x;
-      const y = groundY - o.h;
-      ctx.fillStyle = "#d9d9d9";
-      // base
-      ctx.fillRect(x, y + 18, o.w, 16);
-      // testa
-      ctx.beginPath();
-      ctx.arc(x + o.w/2, y + 10, 7, 0, Math.PI*2);
-      ctx.fill();
+    // decorative chequer band
+    const bandY = gy + 26;
+    const cell = 18;
+    for (let i=0; i<Math.ceil(w/cell); i++){
+      ctx.fillStyle = (i % 2 === 0) ? "rgba(0,0,0,0.06)" : "rgba(176,141,87,0.10)";
+      ctx.fillRect(i*cell, bandY, cell, 10);
     }
 
-    if (over) {
-      ctx.fillStyle = "rgba(0,0,0,.6)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#fff";
-      ctx.font = "700 20px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-      ctx.fillText("Game Over", 22, 50);
-      ctx.font = "400 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
-      ctx.fillText("Premi Ricomincia o fai tap per ripartire", 22, 74);
+    // obstacles: stylized pawns
+    for (const o of obstacles) {
+      const x = o.x;
+      const y = gy - o.h;
+
+      // shadow
+      ctx.fillStyle = "rgba(0,0,0,0.10)";
+      ctx.beginPath();
+      ctx.ellipse(x + o.w/2, gy + 16, o.w*0.9, 5, 0, 0, Math.PI*2);
+      ctx.fill();
+
+      // body
+      ctx.fillStyle = "#1a1a1a";
+      ctx.fillRect(x, y + o.h*0.38, o.w, o.h*0.62);
+
+      // head
+      ctx.fillStyle = "#1a1a1a";
+      ctx.beginPath();
+      ctx.arc(x + o.w/2, y + o.h*0.20, o.w*0.38, 0, Math.PI*2);
+      ctx.fill();
+
+      // tiny highlight (gold)
+      ctx.fillStyle = "rgba(176,141,87,0.55)";
+      ctx.fillRect(x+2, y + o.h*0.55, 3, o.h*0.30);
+    }
+
+    // player: simple king silhouette (minimal)
+    const px = player.x;
+    const py = player.y;
+
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.beginPath();
+    ctx.ellipse(px, gy + 16, 18, 5, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // body (rounded)
+    ctx.fillStyle = "#0f0f0f";
+    roundRect(ctx, px - 13, py - 38, 26, 34, 10);
+    ctx.fill();
+
+    // crown
+    ctx.fillStyle = "#0f0f0f";
+    roundRect(ctx, px - 14, py - 44, 28, 10, 6);
+    ctx.fill();
+    // crown points
+    ctx.fillStyle = "rgba(176,141,87,0.9)";
+    ctx.beginPath();
+    ctx.moveTo(px-10, py-44); ctx.lineTo(px-6, py-52); ctx.lineTo(px-2, py-44);
+    ctx.lineTo(px+2, py-52); ctx.lineTo(px+6, py-44);
+    ctx.lineTo(px+10, py-52); ctx.lineTo(px+14, py-44);
+    ctx.closePath();
+    ctx.fill();
+
+    // state overlay
+    if (!running) {
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#111";
+      ctx.font = "900 26px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      ctx.fillText("Game Over", 18, 56);
+      ctx.font = "600 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      ctx.fillText("Tap o Ricomincia per riprovare", 18, 80);
     }
   }
 
-  function loop(t) {
-    const dt = Math.min(0.033, (t - lastT) / 1000);
-    lastT = t;
+  function roundRect(ctx, x, y, w, h, r){
+    const rr = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr, y);
+    ctx.arcTo(x+w, y, x+w, y+h, rr);
+    ctx.arcTo(x+w, y+h, x, y+h, rr);
+    ctx.arcTo(x, y+h, x, y, rr);
+    ctx.arcTo(x, y, x+w, y, rr);
+    ctx.closePath();
+  }
+
+  function loop(now) {
+    const dt = Math.min(0.033, (now - lastT)/1000);
+    lastT = now;
 
     if (running) update(dt);
-    draw(!running);
-
+    draw();
     requestAnimationFrame(loop);
   }
 
-  // input: tap/click
-  canvas.addEventListener("pointerdown", () => {
-    if (!running) reset();
-    else jump();
-  });
-
+  // input
+  canvas.addEventListener("pointerdown", requestJump);
   restartBtn.addEventListener("click", reset);
 
   // start
   resize();
   reset();
-  requestAnimationFrame(loop);
+  requestAnimationFrame((t0)=>{ lastT=t0; requestAnimationFrame(loop); });
 })();
